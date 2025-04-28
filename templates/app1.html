@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dijkstra</title>
+    <script src="{{ url_for('static', filename='d3.v7.min.js') }}"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+        }
+        h1 {
+            margin-top: 20px;
+            font-size: 24px;
+            color: #333;
+        }
+        svg {
+            display: block;
+            margin: 20px auto;
+            border: 1px solid #ccc;
+            background-color: #f9f9f9;
+        }
+        .line {
+            stroke: #555;
+            stroke-width: 2;
+            cursor: pointer;
+        }
+        .line.selected {
+            stroke: red;
+            stroke-width: 3;
+        }
+        .circle {
+            fill: white;
+            stroke: #333;
+            stroke-width: 2;
+            cursor: pointer;
+        }
+        .circle.selected {
+            fill: #ffcccb;
+        }
+        .label {
+            font-size: 14px;
+            text-anchor: middle;
+            fill: #333;
+            pointer-events: none;
+        }
+        .weight {
+            font-size: 12px;
+            fill: #555;
+            text-anchor: middle;
+            pointer-events: none;
+        }
+        .tooltip {
+            position: absolute;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 5px;
+            border-radius: 3px;
+            font-size: 12px;
+            pointer-events: none;
+        }
+        .button {
+            cursor: pointer;
+            user-select: none;
+        }
+        .button.active {
+            fill: #4CAF50;
+        }
+        .button.inactive {
+            fill: #ccc;
+        }
+        .weight-table {
+            margin: 20px auto;
+            border-collapse: collapse;
+        }
+        .weight-table th, .weight-table td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: center;
+        }
+        .weight-table th {
+            background-color: #f2f2f2;
+        }
+        .weight-table input {
+            width: 50px;
+            text-align: center;
+        }
+        .instructions {
+            margin: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Recherche de Chemin Minimal et Maximal avec l'Algorithme de Dijkstra</h1>
+    
+    <div class="instructions">
+        <p>1. Cliquez sur le bouton "+" pour ajouter des cercles (nœuds)</p>
+        <p>2. Sélectionnez deux cercles puis cliquez sur "Ligne" pour les connecter</p>
+        <p>3. Modifiez les poids des lignes dans le tableau</p>
+        <p>4. Cliquez sur "Continuer" pour calculer les chemins</p>
+    </div>
+    
+    <svg width="800" height="600">
+        <!-- Boutons -->
+        <rect x="10" y="10" width="50" height="30" class="button active" id="add-button"></rect>
+        <text x="35" y="30" class="button-label">+</text>
+
+        <rect x="70" y="10" width="50" height="30" class="button inactive" id="remove-button"></rect>
+        <text x="95" y="30" class="button-label">-</text>
+
+        <rect x="130" y="10" width="80" height="30" class="button inactive" id="line-button"></rect>
+        <text x="170" y="30" class="button-label">Ligne</text>
+
+        <!-- Bouton Continuer -->
+        <rect x="220" y="10" width="100" height="30" class="button inactive" id="continue-button"></rect>
+        <text x="270" y="30" class="button-label">Continuer</text>
+    </svg>
+    <div class="tooltip" style="display: none;"></div>
+
+    <!-- Tableau pour saisir les poids des lignes -->
+    <table class="weight-table">
+        <thead>
+            <tr>
+                <th>De</th>
+                <th>À</th>
+                <th>Poids</th>
+            </tr>
+        </thead>
+        <tbody id="weight-table-body">
+            <!-- Les lignes seront ajoutées dynamiquement ici -->
+        </tbody>
+    </table>
+
+    <!-- Formulaire caché pour envoyer les données -->
+    <form id="graph-data-form" action="{{ url_for('calcul') }}" method="POST" style="display: none;">
+        <input type="hidden" name="points" id="points-input">
+        <input type="hidden" name="lines" id="lines-input">
+    </form>
+
+    <script>
+        // Données initiales vides
+        let points = [];
+        let lines = [];
+
+              // Sélection du SVG
+        const svg = d3.select("svg");
+
+        // Dessiner les lignes (elles doivent être ajoutées avant les cercles pour être sous eux)
+        let drawnLines = svg.selectAll(".line")
+            .data(lines)
+            .enter()
+            .append("line")
+            .attr("class", "line")
+            .attr("x1", d => d.start.x)
+            .attr("y1", d => d.start.y)
+            .attr("x2", d => d.end.x)
+            .attr("y2", d => d.end.y)
+            .on("click", function (event, d) {
+                // Désélectionner toutes les autres lignes
+                drawnLines.classed("selected", false);
+                // Sélectionner la ligne cliquée
+                d3.select(this).classed("selected", true);
+            });
+
+        // Ajouter les poids des lignes
+        let weights = svg.selectAll(".weight")
+            .data(lines)
+            .enter()
+            .append("text")
+            .attr("class", "weight")
+            .attr("x", d => (d.start.x + d.end.x) / 2)
+            .attr("y", d => (d.start.y + d.end.y) / 2)
+            .text(d => d.weight);
+
+        // Dessiner les cercles (points)
+        let circles = svg.selectAll(".circle")
+            .data(points)
+            .enter()
+            .append("circle")
+            .attr("class", "circle")
+            .attr("cx", d => d.x)
+            .attr("cy", d => d.y)
+            .attr("r", 20)
+            .on("click", function (event, d) {
+                d3.select(this).classed("selected", !d3.select(this).classed("selected"));
+            });
+
+        // Ajouter les labels des points
+        let labels = svg.selectAll(".point-label")
+            .data(points)
+            .enter()
+            .append("text")
+            .attr("class", "label")
+            .attr("x", d => d.x)
+            .attr("y", d => d.y + 5)
+            .text(d => d.label);
+
+        // Tooltip pour afficher les informations
+        const tooltip = d3.select(".tooltip");
+
+        // Événement pour afficher le tooltip au survol
+        circles.on("mouseover", function (event, d) {
+            tooltip.style("display", "block")
+                   .html("Maintenez le clic droit et déplacez pour déplacer le cercle.")
+                   .style("left", (event.pageX + 10) + "px")
+                   .style("top", (event.pageY - 10) + "px");
+        });
+
+        circles.on("mouseout", function () {
+            tooltip.style("display", "none");
+        });
+
+           // Fonction pour déplacer les cercles
+        let selectedCircle = null;
+
+        circles.on("mousedown", function (event, circle) {
+            if (event.button === 2) { // Clic droit
+                selectedCircle = circle;
+            }
+        });
+
+        svg.on("mousemove", function (event) {
+            if (selectedCircle) {
+                // Mettre à jour la position du cercle
+                selectedCircle.x = event.offsetX;
+                selectedCircle.y = event.offsetY;
+
+                // Mettre à jour la position visuelle du cercle
+                circles.filter(d => d === selectedCircle)
+                    .attr("cx", d => d.x)
+                    .attr("cy", d => d.y);
+
+                // Mettre à jour les labels des points
+                labels.filter(d => d === selectedCircle)
+                    .attr("x", d => d.x)
+                    .attr("y", d => d.y + 5);
+
+                // Mettre à jour les lignes connectées
+                drawnLines.attr("x1", d => d.start.x)
+                    .attr("y1", d => d.start.y)
+                    .attr("x2", d => d.end.x)
+                    .attr("y2", d => d.end.y);
+
+                // Mettre à jour les poids des lignes
+                weights.attr("x", d => (d.start.x + d.end.x) / 2)
+                    .attr("y", d => (d.start.y + d.end.y) / 2);
+            }
+        });
+
+        svg.on("mouseup", function () {
+            selectedCircle = null;
+        });
+
+        // Empêcher le menu contextuel du clic droit
+        svg.on("contextmenu", function (event) {
+            event.preventDefault();
+        });
+
+        // Gestion des boutons
+        const addButton = d3.select("#add-button");
+        const removeButton = d3.select("#remove-button");
+        const lineButton = d3.select("#line-button");
+        const continueButton = d3.select("#continue-button");
+
+        // Fonction pour générer le prochain label
+        function getNextLabel(currentLabel) {
+            if (!currentLabel) return 'A';
+            const lastChar = currentLabel.charCodeAt(0);
+            return String.fromCharCode(lastChar + 1);
+        }
+
+        // Gestionnaire d'événements pour le bouton "Ajouter"
+        addButton.on("click", function () {
+            addButton.classed("active", true);
+            removeButton.classed("active", false);
+            lineButton.classed("active", false);
+
+            // Trouver le dernier label utilisé
+            const lastLabel = points.length > 0 ? points[points.length - 1].label : null;
+            const newLabel = getNextLabel(lastLabel);
+
+            // Ajouter un nouveau point avec un label séquentiel
+            const newPoint = {
+                x: Math.random() * 700 + 50, // Position aléatoire dans le SVG
+                y: Math.random() * 500 + 50,
+                label: newLabel
+            };
+            points.push(newPoint);
+
+            // Mettre à jour le SVG avec le nouveau cercle et son label
+            circles = svg.selectAll(".circle")
+                .data(points)
+                .enter()
+                .append("circle")
+                .attr("class", "circle")
+                .attr("cx", d => d.x)
+                .attr("cy", d => d.y)
+                .attr("r", 20)
+                .on("click", function (event, d) {
+                    d3.select(this).classed("selected", !d3.select(this).classed("selected"));
+                })
+                .on("mousedown", function (event, d) {
+                    if (event.button === 2) { // Clic droit
+                        selectedCircle = d;
+                    }
+                });
+
+            labels = svg.selectAll(".point-label")
+                .data(points)
+                .enter()
+                .append("text")
+                .attr("class", "label")
+                .attr("x", d => d.x)
+                .attr("y", d => d.y + 5)
+                .text(d => d.label);
+
+            console.log(`Nouveau point ajouté : ${newLabel}`);
+        });
+
+        // Gestionnaire d'événements pour le bouton "Supprimer"
+        removeButton.on("click", function () {
+            addButton.classed("active", false);
+            removeButton.classed("active", true);
+            lineButton.classed("active", false);
+
+            // Récupérer les cercles sélectionnés
+            const selectedCircles = svg.selectAll(".circle.selected").data();
+
+            if (selectedCircles.length > 0) {
+                // Supprimer les points correspondants
+                points = points.filter(point => !selectedCircles.includes(point));
+
+                // Supprimer les lignes connectées aux cercles supprimés
+                lines = lines.filter(line => 
+                    !selectedCircles.includes(line.start) && !selectedCircles.includes(line.end)
+                );
+
+                // Mettre à jour le SVG
+                circles.data(points, d => d.label) // Utiliser le label comme clé pour la mise à jour
+                    .exit()
+                    .remove();
+
+                labels.data(points, d => d.label) // Utiliser le label comme clé pour la mise à jour
+                    .exit()
+                    .remove();
+
+                drawnLines.data(lines, d => `${d.start.label}-${d.end.label}`) // Utiliser une clé unique pour les lignes
+                    .exit()
+                    .remove();
+
+                weights.data(lines, d => `${d.start.label}-${d.end.label}`) // Utiliser une clé unique pour les poids
+                    .exit()
+                    .remove();
+
+                console.log("Cercle et lignes connectées supprimés.");
+            } else {
+                alert("Aucun cercle sélectionné. Veuillez sélectionner un cercle à supprimer.");
+            }
+        });
+
+        // Gestionnaire d'événements pour le bouton "Ligne"
+        lineButton.on("click", function () {
+            addButton.classed("active", false);
+            removeButton.classed("active", false);
+            lineButton.classed("active", true);
+
+            // Récupérer les cercles sélectionnés
+            const selectedCircles = svg.selectAll(".circle.selected").data();
+
+            if (selectedCircles.length === 2) {
+                // Créer une nouvelle ligne entre les deux cercles sélectionnés
+                const newLine = {
+                    start: selectedCircles[0],
+                    end: selectedCircles[1],
+                    weight: '0' // Poids par défaut
+                };
+                lines.push(newLine);
+
+                // Mettre à jour le SVG avec la nouvelle ligne
+                drawnLines = svg.selectAll(".line")
+                    .data(lines)
+                    .enter()
+                    .append("line")
+                    .attr("class", "line")
+                    .attr("x1", d => d.start.x)
+                    .attr("y1", d => d.start.y)
+                    .attr("x2", d => d.end.x)
+                    .attr("y2", d => d.end.y)
+                    .on("click", function (event, d) {
+                        // Désélectionner toutes les autres lignes
+                        drawnLines.classed("selected", false);
+                        // Sélectionner la ligne cliquée
+                        d3.select(this).classed("selected", true);
+                    });
+
+                // Ajouter le poids de la nouvelle ligne
+                weights = svg.selectAll(".weight")
+                    .data(lines)
+                    .enter()
+                    .append("text")
+                    .attr("class", "weight")
+                    .attr("x", d => (d.start.x + d.end.x) / 2)
+                    .attr("y", d => (d.start.y + d.end.y) / 2)
+                    .text(d => d.weight);
+
+                // Ajouter une nouvelle ligne dans le tableau des poids
+                const tableBody = d3.select("#weight-table-body");
+                tableBody.append("tr")
+                    .html(`
+                        <td>${newLine.start.label}</td>
+                        <td>${newLine.end.label}</td>
+                        <td><input type="number" value="${newLine.weight}" onchange="updateWeight('${newLine.start.label}', '${newLine.end.label}', this.value)"></td>
+                    `);
+
+                console.log(`Nouvelle ligne créée entre ${newLine.start.label} et ${newLine.end.label}`);
+            } else {
+                alert("Sélectionnez exactement deux cercles pour créer une ligne.");
+            }
+        });
+
+        // Gestionnaire d'événements pour le bouton "Continuer"
+        continueButton.on("click", function () {
+            // Convertir les données du graphe en JSON
+            const pointsJSON = JSON.stringify(points);
+            const linesJSON = JSON.stringify(lines);
+
+            // Remplir le formulaire caché avec les données
+            document.getElementById('points-input').value = pointsJSON;
+            document.getElementById('lines-input').value = linesJSON;
+
+            // Soumettre le formulaire
+            document.getElementById('graph-data-form').submit();
+        });
+
+        // Fonction pour mettre à jour le poids d'une ligne
+        function updateWeight(startLabel, endLabel, newWeight) {
+            const line = lines.find(line => line.start.label === startLabel && line.end.label === endLabel);
+            if (line) {
+                line.weight = newWeight;
+
+                // Mettre à jour le poids affiché dans le SVG
+                weights.data(lines)
+                    .text(d => d.weight);
+            }
+        }
+
+        // Initialiser le tableau des poids
+        const tableBody = d3.select("#weight-table-body");
+        lines.forEach(line => {
+            tableBody.append("tr")
+                .html(`
+                    <td>${line.start.label}</td>
+                    <td>${line.end.label}</td>
+                    <td><input type="number" value="${line.weight}" onchange="updateWeight('${line.start.label}', '${line.end.label}', this.value)"></td>
+                `);
+        });
+    </script>
+</body>
+</html>

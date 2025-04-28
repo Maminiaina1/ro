@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="{{ url_for('static', filename='d3.v7.min.js') }}"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+        }
+        h1 {
+            margin-top: 20px;
+            font-size: 24px;
+            color: #333;
+        }
+        svg {
+            display: block;
+            margin: 20px auto;
+            border: 1px solid #ccc;
+            background-color: #f9f9f9;
+        }
+        .line {
+            stroke: #555;
+            stroke-width: 2;
+        }
+        .circle {
+            fill: white;
+            stroke: #333;
+            stroke-width: 2;
+            cursor: pointer;
+        }
+        .label {
+            font-size: 14px;
+            text-anchor: middle;
+            fill: #333;
+            pointer-events: none;
+        }
+        .weight {
+            font-size: 12px;
+            fill: #555;
+            text-anchor: middle;
+            pointer-events: none;
+        }
+        .min-path {
+            stroke: red;
+            stroke-width: 3;
+            marker-end: url(#arrow);
+        }
+        .min-node {
+            fill: yellow;
+        }
+        table {
+            margin: 20px auto;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid #333;
+            padding: 8px;
+            text-align: center;
+        }
+        .min-value {
+            background-color: yellow;
+        }
+        .other-value {
+            background-color: #f0f0f0;
+        }
+        button {
+            margin: 20px;
+            padding: 10px 20px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Calcul de Dijkstra</h1>
+    <svg width="800" height="600">
+        <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+                <path d="M0,0 L0,6 L9,3 z" fill="red" />
+            </marker>
+        </defs>
+        <!-- Les éléments du graphe seront ajoutés dynamiquement ici -->
+    </svg>
+    <button id="calculate-btn">Calculer</button>
+    <table id="result-table">
+        <!-- Le tableau des résultats sera ajouté dynamiquement ici -->
+    </table>
+
+    <script>
+        const points = {{ points | tojson | safe }};
+        const lines = {{ lines | tojson | safe }};
+
+        const svg = d3.select("svg");
+
+        // Dessiner les lignes
+        svg.selectAll(".line")
+            .data(lines)
+            .enter()
+            .append("line")
+            .attr("class", "line")
+            .attr("x1", d => d.start.x)
+            .attr("y1", d => d.start.y)
+            .attr("x2", d => d.end.x)
+            .attr("y2", d => d.end.y);
+
+        // Ajouter les poids des lignes
+        svg.selectAll(".weight")
+            .data(lines)
+            .enter()
+            .append("text")
+            .attr("class", "weight")
+            .attr("x", d => (d.start.x + d.end.x) / 2)
+            .attr("y", d => (d.start.y + d.end.y) / 2)
+            .text(d => d.weight);
+
+        // Dessiner les cercles (points)
+        svg.selectAll(".circle")
+            .data(points)
+            .enter()
+            .append("circle")
+            .attr("class", "circle")
+            .attr("cx", d => d.x)
+            .attr("cy", d => d.y)
+            .attr("r", 20);
+
+        // Ajouter les labels des points
+        svg.selectAll(".point-label")
+            .data(points)
+            .enter()
+            .append("text")
+            .attr("class", "label")
+            .attr("x", d => d.x)
+            .attr("y", d => d.y + 5)
+            .text(d => d.label);
+
+        // Construire le graphe dynamiquement à partir des points et des lignes
+        const graph = points.map(point => {
+            return {
+                label: point.label,
+                connections: lines
+                    .filter(line => line.start.label === point.label)
+                    .map(line => ({
+                        label: line.end.label,
+                        weight: line.weight
+                    }))
+            };
+        });
+
+        // Variable globale pour stocker previous
+        let previous;
+
+        document.getElementById('calculate-btn').addEventListener('click', () => {
+            const start = 'A'; // Point de départ
+            const end = 'H';   // Point d'arrivée
+
+            const { distances, previous: prev } = dijkstra(graph, start);
+            previous = prev; // Assigner la valeur de previous à la variable globale
+
+            // Afficher les résultats dans un tableau
+            const table = d3.select("#result-table");
+            table.html(""); // Clear previous table
+
+            // En-têtes du tableau (nœuds)
+            const headers = points.map(point => point.label);
+            table.append("thead").append("tr")
+                .selectAll("th")
+                .data(headers)
+                .enter()
+                .append("th")
+                .text(d => d);
+
+            // Calcul des valeurs pour chaque nœud
+            const rows = [];
+            Object.keys(distances).forEach(node => {
+                const row = [];
+                headers.forEach(header => {
+                    if (node === header) {
+                        row.push(`${distances[node]}${previous[node] || ''}`);
+                    } else {
+                        row.push("");
+                    }
+                });
+                rows.push(row);
+            });
+
+            // Ajouter les lignes au tableau
+            const tbody = table.append("tbody");
+            rows.forEach(row => {
+                tbody.append("tr")
+                    .selectAll("td")
+                    .data(row)
+                    .enter()
+                    .append("td")
+                    .text(d => d)
+                    .attr("class", (d, i) => {
+                        const value = parseInt(d);
+                        if (!isNaN(value) && value === Math.min(...rows.map(r => parseInt(r[i]) || Infinity))) {
+                            return "min-value";
+                        } else {
+                            return "other-value";
+                        }
+                    });
+            });
+
+            // Colorer les nœuds et les arêtes du chemin minimal
+            highlightMinPath(start, end);
+
+            // Colorer les autres cercles en blanc
+            svg.selectAll(".circle")
+                .attr("class", "circle");
+        });
+
+        function dijkstra(graph, start) {
+            const distances = {};
+            const previous = {};
+            const nodes = new Set();
+
+            graph.forEach(node => {
+                distances[node.label] = Infinity;
+                previous[node.label] = null;
+                nodes.add(node.label);
+            });
+
+            distances[start] = 0;
+
+            while (nodes.size) {
+                let smallest = [...nodes].reduce((a, b) => distances[a] < distances[b] ? a : b);
+                nodes.delete(smallest);
+
+                graph.find(node => node.label === smallest).connections.forEach(neighbor => {
+                    let alt = distances[smallest] + neighbor.weight;
+                    if (alt < distances[neighbor.label]) {
+                        distances[neighbor.label] = alt;
+                        previous[neighbor.label] = smallest;
+                    }
+                });
+            }
+
+            return { distances, previous };
+        }
+
+        function highlightMinPath(start, end) {
+            let current = end;
+            while (current !== start) {
+                const prev = previous[current];
+                svg.selectAll(".circle")
+                    .filter(d => d.label === current)
+                    .attr("class", "circle min-node");
+
+                svg.selectAll(".line")
+                    .filter(d => (d.start.label === prev && d.end.label === current) || (d.start.label === current && d.end.label === prev))
+                    .attr("class", "line min-path");
+
+                current = prev;
+            }
+            svg.selectAll(".circle")
+                .filter(d => d.label === start)
+                .attr("class", "circle min-node");
+        }
+    </script>
+</body>
+</html>
